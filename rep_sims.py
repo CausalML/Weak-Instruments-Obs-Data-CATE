@@ -1,4 +1,4 @@
-# Reproduces Figure 1 (bottom row) from "Estimating Heterogeneous Treatment Effects by Combining Weak Instruments and Observational Data"
+# Reproduces Figure 2 (bottom row) from "Estimating Heterogeneous Treatment Effects by Combining Weak Instruments and Observational Data"
 import os
 import numpy as np
 import matplotlib

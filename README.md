@@ -15,9 +15,9 @@ Replication code for **Estimating Heterogeneous Treatment Effects by Combining W
 
 Use the following commands to replicate the figures from the "Estimating Heterogeneous Treatment Effects by Combining Weak Instruments and Observational Data" paper:
 
-* For Figure 1, top row: ```python para_sims.py```
-* For Figure 1, bottom row: ```python rep_sims.py```
-* For Figure 2 & 3: ```python 401k.py```
+* For Figure 2, top row, and Table 1: ```python para_sims.py```
+* For Figure 2, bottom row: ```python rep_sims.py```
+* For Figure 3 & 4, Table 4 & 5: ```python 401k.py```
 
 ## Interactive Experimentation
 

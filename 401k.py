@@ -1,4 +1,4 @@
-# Reproduces Figure 2 & 3 from "Estimating Heterogeneous Treatment Effects by Combining Weak Instruments and Observational Data"
+# Reproduces Figures 3 & 4 and Tables 4 & 5 from "Estimating Heterogeneous Treatment Effects by Combining Weak Instruments and Observational Data"
 
 import os
 import matplotlib
@@ -27,6 +27,10 @@ plt.rcParams['font.size'] = 18
 # Make figures directory
 if not os.path.exists("figures"):
     os.makedirs("figures")
+
+# Make tables directory
+if not os.path.exists("tables"):
+    os.makedirs("tables")
 
 ###################
 # Data Processing #
@@ -74,9 +78,10 @@ Y = (Y-Y_mean)/Y_std
 X_O, X_E, Z_O, Z_E, A_O, A_E, Y_O, Y_E = train_test_split(X, Z, A, Y, test_size=0.5, random_state=1)
 print("DONE.")
 
-############
-# Modeling #
-############
+#################
+# Figures 3 & 4 #
+#################
+# Modeling 
 print(r"Learning $\widehat{\gamma}$, $\widehat{\pi}_Z$, $\widehat{\tau}^O$, $\widehat{\tau}^E$...", end='')
 # RF hyperparameters
 n_estimators = 100
@@ -222,3 +227,94 @@ plt.title("Age:40, Income: $30,000, Married", fontsize=16)
 plt.savefig("figures/401k_parametric_extrapolation_married.pdf", dpi=200, bbox_inches="tight")
 plt.show()
 print("DONE.")
+
+################
+# Tables 2 & 3 #
+################
+def run_experiment(i, marr=False):
+    np.random.seed(i)
+    X_O, X_E, Z_O, Z_E, A_O, A_E, Y_O, Y_E = train_test_split(X, Z, A, Y, test_size=0.5, random_state=i)
+    
+    ### Get ground truth by getting CATEs on the IV dataset
+    # Get one-sided compliance score
+    pi1_z_model = RandomForestClassifier(
+        n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=5, n_jobs=-2)
+    pi1_z_model.fit(X_E[Z_E==1], A_E[Z_E==1])
+    # Get Z outcome models
+    mu1_z_model =  RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=min_samples_leaf, n_jobs=-2)
+    mu1_z_model.fit(X_E[Z_E==1], Y_E[Z_E==1])
+    mu0_z_model = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=min_samples_leaf, n_jobs=-2)
+    mu0_z_model.fit(X_E[Z_E==0], Y_E[Z_E==0])
+    # CATE model
+    cate_iv = lambda x: (mu1_z_model.predict(x) - mu0_z_model.predict(x)) / pi1_z_model.predict_proba(x)[:, 1]
+    
+    ### Get observational CATE
+    # Y models for observational data
+    mu1_a_model =  RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=min_samples_leaf, n_jobs=-2)
+    mu1_a_model.fit(X_O[A_O==1], Y_O[A_O==1])
+    mu0_a_model = RandomForestRegressor(n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=min_samples_leaf, n_jobs=-2)
+    mu0_a_model.fit(X_O[A_O==0], Y_O[A_O==0])
+    # CATE model
+    cate_obs = lambda x: mu1_a_model.predict(x) - mu0_a_model.predict(x)
+    
+    # Learn pi_Z model
+    pi_z_model = RandomForestClassifier(
+        n_estimators=n_estimators, max_depth=max_depth, 
+        max_features=max_features, min_samples_leaf=5, n_jobs=-2)
+    pi_z_model.fit(X_E, Z_E)
+    
+    bias_model = Pipeline([
+    ('polynomial_features', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),  # Polynomial transformation with degree 2
+    ('standard_scaler', StandardScaler()),
+    ('regressor', Lasso(alpha=0.07))  # Example regressor
+    ])
+    gamma = pi1_z_model.predict_proba(X_E)[:, 1]
+    pi_z = pi_z_model.predict_proba(X_E)[:, 1]
+    V_z = pi_z*(1-pi_z)
+    weights = (gamma**2)*V_z
+    Y_tilde = (Y_E*Z_E/pi_z - Y_E*(1-Z_E)/(1-pi_z))/gamma - cate_obs(X_E)
+    compliance_filter = (X_E[:, 2]>=(12 - X_means[2])/X_std[2])
+    bias_model.fit(X_E[compliance_filter], Y_tilde[compliance_filter], regressor__sample_weight=weights[compliance_filter])
+    
+    # X_test
+    edu_range = np.arange(8, 19)
+    X_test = np.empty((edu_range.size, 9))
+    X_test[:, 0] = (40 - X_means[0])/X_std[0]
+    X_test[:, 1] = (30000 - X_means[1])/X_std[1]
+    X_test[:, 2] = (edu_range - X_means[2])/X_std[2]
+    X_test[:, 3] = (1-X_means[3])/X_std[3]
+    X_test[:, 4] = 0
+    X_test[:, 5] = 0
+    X_test[:, 6] = 0
+    X_test[:, 7] = 0
+    X_test[:, 8] = 0
+    if marr:
+        X_test[:, 3] = (2-X_means[3])/X_std[3]
+        X_test[:, 4] = 1
+    
+    return (cate_obs(X_test)*Y_std), (cate_iv(X_test)*Y_std), (cate_obs(X_test)*Y_std + bias_model.predict(X_test)*Y_std)
+
+# Run experiments
+n_iter = 100
+for marr in [False, True]:
+    table_results = {"Educ": [], r"$\widehat{\tau}^O(x)$ (in $1,000)": [], r"$\widehat{\tau}^E(x)$ (in $1,000)": [], r"$\widehat{\tau}(x)$ (in $1,000)": []}
+    print(f"Running Algorithm 1 for {n_iter} and marr={marr}...", end="")
+    results = Parallel(n_jobs=-1, verbose=1)(delayed(run_experiment)(i, marr) for i in range(n_iter))
+    for i in [0, 2, 4]:
+        table_results["Educ"].append(i+8)
+        tau_O_results = np.array([result[0][i] for result in results])
+        tau_E_results = np.array([result[1][i] for result in results])
+        tau_corrected = np.array([result[2][i] for result in results])
+
+        table_results[r"$\widehat{\tau}^O(x)$ (in $1,000)"].append(f"{tau_O_results.mean()/1000:.2f} \xb1 {tau_O_results.std()/1000:.2f}")
+        table_results[r"$\widehat{\tau}^E(x)$ (in $1,000)"].append(f"{tau_E_results.mean()/1000:.2f} \xb1 {tau_E_results.std()/1000:.2f}")
+        table_results[r"$\widehat{\tau}(x)$ (in $1,000)"].append(f"{tau_corrected.mean()/1000:.2f} \xb1 {tau_corrected.std()/1000:.2f}")
+
+    table_pd = pd.DataFrame(table_results)
+    table_pd.to_csv(f"tables/401k_parametric_extrapolation_sims_marr_{marr}.csv", index=False)
+    print("DONE.")
